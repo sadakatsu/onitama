@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import List
+import random
 
 
 class Color(Enum):
@@ -30,6 +31,15 @@ class Coordinate:
     @property
     def valid(self):
         return 0 <= self.x < 5 and 0 <= self.y < 5
+
+    def __eq__(self, other):
+        return isinstance(other, Coordinate) and self.x == other.x and self.y == other.y
+
+    def __hash__(self):
+        return self.y * 5 + self.x
+
+    def __repr__(self):
+        return f'({self.x}, {self.y})'
 
 
 class Delta:
@@ -62,7 +72,7 @@ class Movement(Enum):
     BACK_RIGHT = (-1, 1)
 
     def __init__(self, forward: int, right: int):
-        self._delta = Delta(forward, right)
+        self._delta = Delta(right, -forward)
 
     def delta(self, color: Color) -> Delta:
         return self._delta if color is Color.RED else self._delta.opposite
@@ -122,8 +132,9 @@ class Move:
         return self.movement in self.card.movements and self.destination(color).valid
 
 
-if __name__ == '__main__':
-    possible_moves = []
+def get_possible_moves() -> List[Move]:
+    # There are 903 possible moves in Onitama.  Only a small number of them will be legal in any given position.
+    possible_moves: List[Move] = []
     for x in range(5):
         for y in range(5):
             coordinate = Coordinate(x, y)
@@ -132,6 +143,104 @@ if __name__ == '__main__':
                     move = Move(coordinate, card, movement)
                     if move.valid(Color.RED):
                         possible_moves.append(move)
-    print(len(possible_moves))
-    for move in possible_moves:
-        print(f"  ({move.coordinate.x}, {move.coordinate.y}), {move.card}, {move.movement}")
+    return possible_moves
+
+
+ALL_MOVES = get_possible_moves()
+
+
+class HandState:
+    def __init__(self, cards: List[Card] = None, source=None):
+        if source is not None:
+            self.hands = {Color.RED: set(source.hands[Color.RED]), Color.BLUE: set(source.hands[Color.BLUE])}
+            self.reserve = source.reserve
+        else:
+            self.hands = {Color.RED: set(), Color.BLUE: set()}
+            if cards is None:
+                candidates = [x for x in Card]
+                random.shuffle(candidates)
+                cards = candidates[0:5]
+            self.hands[Color.RED].add(cards[0])
+            self.hands[Color.RED].add(cards[1])
+            self.hands[Color.BLUE].add(cards[2])
+            self.hands[Color.BLUE].add(cards[3])
+            self.reserve = cards[4]
+
+    def play(self, color: Color, card: Card):
+        if card not in self.hands[color]:
+            raise Exception('Invalid play.')
+        next_state = HandState(source=self)
+        next_state.hands[color].remove(card)
+        next_state.hands[color].add(next_state.reserve)
+        next_state.reserve = card
+
+
+class ZobristIndex:
+    def __init__(self):
+        r = random.Random(0xbadf00d)
+        self.start = r.getrandbits(64)
+        self.cards = {card: {color: r.getrandbits(64) for color in Color} for card in Card}
+        self.board = {
+            Coordinate(x, y): {
+                piece: r.getrandbits(64) for piece in Piece
+            }
+            for x in range(5)
+            for y in range(5)
+        }
+
+
+ZOBRIST = ZobristIndex()
+
+
+class Board:
+    def __init__(self, source=None):
+        if source is not None:
+            self.cells = {coordinate: piece for coordinate, piece in source.cells.items()}
+            self.zobrist: int = source.zobrist
+        else:
+            self.cells = {}
+            self.zobrist: int = ZOBRIST.start
+            for y in range(5):
+                for x in range(5):
+                    coordinate = Coordinate(x, y)
+                    if 0 < y < 4:
+                        piece = Piece.NONE
+                    elif x == 2:
+                        piece = Piece.BLUE_MASTER if y == 0 else Piece.RED_MASTER
+                    else:
+                        piece = Piece.BLUE_STUDENT if y == 0 else Piece.RED_STUDENT
+                    self.cells[coordinate] = piece
+                    self.zobrist ^= ZOBRIST.board[coordinate][piece]
+
+    def __getitem__(self, item: Coordinate):
+        return self.cells[item]
+
+    def __setitem__(self, key: Coordinate, value: Piece):
+        old = self[key]
+        if old == value:
+            return
+        self.zobrist ^= ZOBRIST.board[key][old]
+        self.cells[key] = value
+        self.zobrist ^= ZOBRIST.board[key][value]
+
+
+if __name__ == '__main__':
+    print(len(ALL_MOVES))
+    board = Board()
+    print(board.zobrist)
+    for y in range(5):
+        line = ''
+        for x in range(5):
+            coordinate = Coordinate(x, y)
+            piece = board[coordinate]
+            if piece is Piece.NONE:
+                line += '_ '
+            elif piece is Piece.BLUE_STUDENT:
+                line += 'b '
+            elif piece is Piece.BLUE_MASTER:
+                line += 'B '
+            elif piece is Piece.RED_STUDENT:
+                line += 'r '
+            else:
+                line += 'R '
+        print(line.rstrip())
