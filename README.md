@@ -1,4 +1,4 @@
-#Onitama
+# Onitama
 
 This project is intended to train a deep learning model to play [Onitama](https://www.arcanewonders.com/game/onitama/).
 My hope is to use this as a test project to refine my understanding of deep learning systems and reinforcement learning
